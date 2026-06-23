@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ВебВерфь · панель</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#262b35;--fg:#e6e6e6;--mut:#9aa5b1;--acc:#7aa2f7;--ok:#2dd4a7}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+#login{max-width:340px;margin:14vh auto;padding:26px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
+#login h1{font-size:18px;margin:0 0 4px}#login p{color:var(--mut);margin:0 0 18px;font-size:13px}
+input{width:100%;padding:10px 12px;margin:6px 0;background:#0f1115;color:var(--fg);border:1px solid var(--line);border-radius:8px}
+button{cursor:pointer;border:none;border-radius:8px;background:var(--acc);color:#0b1020;font-weight:700;padding:10px 14px}
+button.ghost{background:transparent;color:var(--acc);border:1px solid var(--line)}
+.err{color:#ff6b6b;font-size:13px;min-height:18px}
+#app{display:none}
+header{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line);padding:12px 18px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+header b{margin-right:14px}
+.tab{cursor:pointer;padding:6px 12px;border-radius:8px;color:var(--mut);font-weight:600}
+.tab.on{background:#222734;color:var(--fg)}
+.gen{margin-left:auto;color:var(--mut);font-size:12px}
+main{max-width:1080px;margin:0 auto;padding:18px}
+h2{font-size:15px;color:var(--mut);margin:20px 0 8px}
+.cards{display:flex;gap:12px;flex-wrap:wrap}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:120px}
+.card .n{font-size:26px;font-weight:800}.card .l{color:var(--mut);font-size:12px}
+table{width:100%;border-collapse:collapse;margin-top:6px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:top}
+th{color:var(--mut)}
+.bar{background:var(--acc);height:15px;border-radius:4px;min-width:2px}
+.pill{font-size:11px;padding:1px 7px;border-radius:10px;background:#222734;color:var(--mut)}
+.mut{color:var(--mut)} .seg{display:inline-flex;gap:4px;margin:4px 0}
+.seg a{cursor:pointer;padding:3px 10px;border-radius:8px;background:var(--panel);border:1px solid var(--line);color:var(--mut)}
+.seg a.on{color:var(--fg);border-color:var(--acc)}
+.urow{cursor:pointer} .tl{background:#10131a}
+.lead{background:#13261f;border-left:3px solid var(--ok);padding:8px 10px;border-radius:6px;margin:6px 0}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>ВебВерфь · панель</h1>
+  <p>Вход для администратора</p>
+  <input id="lg" placeholder="логин" autocomplete="username">
+  <input id="pw" type="password" placeholder="пароль" autocomplete="current-password">
+  <button id="go" style="width:100%;margin-top:8px">Войти</button>
+  <div class="err" id="err"></div>
+</div>
+
+<div id="app">
+  <header>
+    <b>ВебВерфь · панель</b>
+    <span class="tab on" data-t="ov">Обзор</span>
+    <span class="tab" data-t="jr">Журнал</span>
+    <span class="tab" data-t="us">Посетители</span>
+    <span class="gen" id="gen"></span>
+  </header>
+  <main id="view"></main>
+</div>
+
+<script>
+let DATA=null, period="7";
+const $=s=>document.querySelector(s);
+const enc=new TextEncoder(), dec=new TextDecoder();
+const esc=s=>String(s==null?"—":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+function fmt(ts){try{const d=new Date(ts);const m=new Date(d.getTime()+3*3600*1000);
+  const p=n=>String(n).padStart(2,"0");return p(m.getUTCDate())+"."+p(m.getUTCMonth()+1)+" "+p(m.getUTCHours())+":"+p(m.getUTCMinutes());}catch(e){return ts}}
+
+async function decryptData(login,pass,b64){
+  const raw=Uint8Array.from(atob(b64.trim()),c=>c.charCodeAt(0));
+  const salt=raw.slice(0,16), iv=raw.slice(16,28), body=raw.slice(28);
+  const km=await crypto.subtle.importKey("raw",enc.encode(login+":"+pass),"PBKDF2",false,["deriveKey"]);
+  const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:200000,hash:"SHA-256"},km,{name:"AES-GCM",length:256},false,["decrypt"]);
+  const plain=await crypto.subtle.decrypt({name:"AES-GCM",iv},key,body);
+  return JSON.parse(dec.decode(plain));
+}
+
+$("#go").onclick=async()=>{
+  $("#err").textContent="";
+  try{
+    const r=await fetch("data.enc",{cache:"no-store"});
+    if(!r.ok) throw new Error("нет data.enc");
+    const b64=await r.text();
+    DATA=await decryptData($("#lg").value.trim(),$("#pw").value,b64);
+    $("#login").style.display="none"; $("#app").style.display="block";
+    $("#gen").textContent="снимок: "+fmt(DATA.generated)+" МСК";
+    render();
+  }catch(e){ $("#err").textContent="Неверный логин/пароль или данные недоступны."; }
+};
+$("#pw").addEventListener("keydown",e=>{if(e.key==="Enter")$("#go").click();});
+
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("on"));
+  t.classList.add("on"); render(t.dataset.t);
+});
+
+function render(tab){
+  tab=tab||"ov";
+  if(tab==="ov") return renderOverview();
+  if(tab==="jr") return renderJournal();
+  if(tab==="us") return renderUsers();
+}
+
+function renderOverview(){
+  const o=DATA.overview[period];
+  let cards=`<div class=card><div class=n>${o.events}</div><div class=l>событий</div></div>
+    <div class=card><div class=n>${o.users}</div><div class=l>уник. пользователей</div></div>`;
+  o.by_platform.forEach(p=>cards+=`<div class=card><div class=n>${p.n}</div><div class=l>${esc(p.platform)}: ${p.u} польз.</div></div>`);
+  const mx=Math.max(1,...o.top_sections.map(s=>s.n));
+  let sec=o.top_sections.map(s=>`<tr><td>${esc(s.event)}</td><td style="width:48%"><div class=bar style="width:${Math.round(100*s.n/mx)}%"></div></td><td>${s.n}</td><td class=mut>${s.u} польз.</td></tr>`).join("")||`<tr><td class=mut colspan=4>нет данных</td></tr>`;
+  let files=o.files.map(f=>`<tr><td>${esc(f.event)}</td><td>${f.n}</td><td class=mut>${f.u} польз.</td></tr>`).join("")||`<tr><td class=mut colspan=3>нет данных</td></tr>`;
+  $("#view").innerHTML=`
+    <div class=seg>период: ${["1","7","30"].map(d=>`<a class="${d===period?"on":""}" onclick="period='${d}';renderOverview()">${d==="1"?"сутки":d+"д"}</a>`).join("")}</div>
+    <div class=cards style="margin-top:8px">${cards}</div>
+    <h2>Переходы по разделам</h2><table><tr><th>Раздел</th><th></th><th>Переходов</th><th></th></tr>${sec}</table>
+    <h2>Открытия файлов / превью</h2><table><tr><th>Объект</th><th>Открытий</th><th></th></tr>${files}</table>`;
+}
+
+function who(r){return esc(r.name)+(r.username?` <span class=mut>@${esc(r.username)}</span>`:"");}
+
+function renderJournal(){
+  const rows=DATA.journal.map(r=>`<tr><td class=mut>${fmt(r.ts)}</td><td><span class=pill>${esc(r.platform)}</span></td><td>${who(r)}</td><td class=mut>${esc(r.category)}</td><td>${esc(r.event)}</td></tr>`).join("")||`<tr><td class=mut colspan=5>нет данных</td></tr>`;
+  $("#view").innerHTML=`<h2>Журнал событий (МСК)</h2><table><tr><th>Время</th><th></th><th>Кто</th><th>Категория</th><th>Действие</th></tr>${rows}</table>`;
+}
+
+function renderUsers(){
+  const rows=DATA.users.map((u,i)=>{
+    const tl=(u.timeline||[]).map(r=>`<tr class=tl><td class=mut>${fmt(r.ts)}</td><td class=mut>${esc(r.category)}</td><td>${esc(r.event)}</td></tr>`).join("");
+    const leads=(u.leads||[]).map(l=>`<div class=lead>Заявка ${fmt(l.ts)}: ${esc(l.task)} · срок ${esc(l.deadline)} · бюджет ${esc(l.budget)} · <b>${esc(l.contact)}</b></div>`).join("");
+    return `<tr class=urow onclick="document.getElementById('d${i}').style.display=document.getElementById('d${i}').style.display==='none'?'table-row':'none'">
+        <td>${who(u)}</td><td><span class=pill>${esc(u.platform)}</span></td><td>${u.actions}</td><td class=mut>${fmt(u.last_seen)}</td><td>${(u.leads&&u.leads.length)?"✅ заявка":""}</td></tr>
+      <tr id="d${i}" style="display:none"><td colspan=5>${leads}<table>${tl||"<tr><td class=mut>нет действий</td></tr>"}</table></td></tr>`;
+  }).join("")||`<tr><td class=mut colspan=5>нет данных</td></tr>`;
+  $("#view").innerHTML=`<h2>Посетители (клик — подробнее)</h2><table><tr><th>Кто</th><th></th><th>Действий</th><th>Последний визит</th><th></th></tr>${rows}</table>`;
+}
+</script>
+</body>
+</html>
